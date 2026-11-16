@@ -11,6 +11,7 @@ from sglang.srt.hardware_backend.npu.graph_runner.eagle_draft_npu_graph_runner i
 from sglang.srt.layers.dp_attention import get_attention_tp_group
 from sglang.srt.layers.logits_processor import LogitsProcessorOutput
 from sglang.srt.layers.moe.utils import (
+    pagedmoe_mtp_kt_context,
     speculative_kt_ep_disabled_context,
     speculative_moe_a2a_backend_context,
     speculative_moe_backend_context,
@@ -137,9 +138,15 @@ class EAGLEWorker(TpModelWorker):
             ctx = draft_tp_context(get_attention_tp_group())
         else:
             ctx = empty_context()
+        _mtp_weight_path = getattr(server_args, "kt_mtp_weight_path", None)
+        _draft_kt_ctx = (
+            pagedmoe_mtp_kt_context()
+            if _mtp_weight_path is not None
+            else speculative_kt_ep_disabled_context()
+        )
         with (
             ctx
-        ), speculative_moe_backend_context(), speculative_moe_a2a_backend_context(), speculative_kt_ep_disabled_context():
+        ), speculative_moe_backend_context(), speculative_moe_a2a_backend_context(), _draft_kt_ctx:
             super().__init__(
                 server_args=server_args,
                 gpu_id=gpu_id,

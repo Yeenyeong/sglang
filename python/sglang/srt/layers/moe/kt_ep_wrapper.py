@@ -1641,10 +1641,45 @@ def create_kt_config_from_server_args(
         KTConfig if KT is configured and not disabled, None otherwise
     """
     # Check if KT EP wrapper is disabled (e.g., for draft models in speculative decoding)
-    from sglang.srt.layers.moe.utils import is_kt_ep_wrapper_disabled
+    from sglang.srt.layers.moe.utils import (
+        is_kt_ep_wrapper_disabled,
+        is_kt_ep_wrapper_use_mtp_path,
+    )
+
+    use_mtp_path = is_kt_ep_wrapper_use_mtp_path()
 
     if is_kt_ep_wrapper_disabled():
         return None
+
+    # MTP path: use the separate MTP storage (1 layer, layer_idx always 0)
+    if use_mtp_path:
+        mtp_weight_path = getattr(server_args, "kt_mtp_weight_path", None)
+        if mtp_weight_path is None:
+            return None
+        num_experts = None
+        hf_config = server_args.get_hf_config()
+        if hasattr(hf_config, "text_config"):
+            hf_config = hf_config.text_config
+        num_experts_val = getattr(hf_config, "num_experts", None)
+        # Build an all-CPU gpu_experts_mask (no GPU experts for MTP)
+        gpu_experts_mask = torch.zeros(
+            num_experts_val if num_experts_val is not None else 512,
+            dtype=torch.bool,
+        )
+        return KTConfig(
+            layer_idx=0,  # MTP storage is 1-layer, always layer 0
+            gpu_experts_mask=gpu_experts_mask,
+            cpuinfer_threads=server_args.kt_cpuinfer,
+            threadpool_count=server_args.kt_threadpool_count,
+            numa_nodes=server_args.kt_numa_nodes,
+            weight_path=mtp_weight_path,
+            chunked_prefill_size=server_args.chunked_prefill_size,
+            method=server_args.kt_method,
+            max_deferred_experts_per_token=0,
+            num_layers=1,
+            gpu_prefill_token_threshold=server_args.kt_gpu_prefill_token_threshold,
+            kt_enable_dynamic_expert_update=False,
+        )
 
     if server_args.kt_weight_path is None:
         return None

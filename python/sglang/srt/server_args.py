@@ -551,6 +551,8 @@ class ServerArgs:
 
     # Ktransformers/AMX expert parallelism
     kt_weight_path: Optional[str] = None
+    # Separate pagedmoe storage for MTP layer (1-layer storage, num_layers=1)
+    kt_mtp_weight_path: Optional[str] = None
     kt_method: Optional[str] = None
     kt_cpuinfer: Optional[int] = None
     kt_threadpool_count: Optional[int] = None
@@ -1628,6 +1630,16 @@ class ServerArgs:
                 support_mamba_cache_extra_buffer=True,
                 sm100_default_attention_backend="triton",
             )
+            if self.speculative_algorithm == "EAGLE":
+                self.enable_multi_layer_eagle = True
+                logger.info(
+                    f"Enable multi-layer EAGLE speculative decoding for {model_arch} (MTP draft)."
+                )
+                if not envs.SGLANG_ENABLE_SPEC_V2.get():
+                    envs.SGLANG_ENABLE_SPEC_V2.set(True)
+                    logger.warning(
+                        "Spec v2 is enabled for multi-layer EAGLE speculative decoding."
+                    )
 
         elif model_arch in ["Glm4MoeForCausalLM"]:
             if is_sm100_supported():
@@ -4435,6 +4447,13 @@ class ServerArgs:
             "--kt-weight-path",
             type=str,
             help="[ktransformers parameter] The path of the quantized expert weights for amx kernel. A local folder.",
+        )
+        parser.add_argument(
+            "--kt-mtp-weight-path",
+            type=str,
+            default=None,
+            help="[ktransformers/pagedmoe parameter] Path to a 1-layer pagedmoe storage for the MTP draft layer. "
+                 "When set, the MTP draft model's MoE layer also runs via pagedmoe on CPU instead of GPU.",
         )
         parser.add_argument(
             "--kt-method",

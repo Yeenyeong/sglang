@@ -41,6 +41,7 @@ class Qwen3_5ForCausalLMMTP(nn.Module):
         config: PretrainedConfig,
         quant_config=None,
         prefix: str = "",
+        draft_model_idx: Optional[int] = None,
     ) -> None:
         nn.Module.__init__(self)
 

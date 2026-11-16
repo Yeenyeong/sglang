@@ -141,6 +141,8 @@ DEEPEP_CONFIG: Optional[str] = None
 DISABLE_FLASHINFER_CUTLASS_MOE_FP4_ALLGATHER: Optional[bool] = None
 MOE_QUANTIZATION: Optional[str] = None
 DISABLE_KT_EP_WRAPPER: bool = False
+# When True, kt_ep_wrapper should use the MTP-specific weight path instead of kt_weight_path
+KT_EP_WRAPPER_USE_MTP_PATH: bool = False
 
 
 def initialize_moe_config(server_args: ServerArgs):
@@ -325,6 +327,12 @@ def is_kt_ep_wrapper_disabled() -> bool:
     return DISABLE_KT_EP_WRAPPER
 
 
+def is_kt_ep_wrapper_use_mtp_path() -> bool:
+    """Check if KT EP wrapper should use the MTP weight path (for Qwen3.5 MTP draft layer)."""
+    global KT_EP_WRAPPER_USE_MTP_PATH
+    return KT_EP_WRAPPER_USE_MTP_PATH
+
+
 @contextmanager
 def speculative_kt_ep_disabled_context():
     """
@@ -339,6 +347,24 @@ def speculative_kt_ep_disabled_context():
         yield
     finally:
         DISABLE_KT_EP_WRAPPER = original_value
+
+
+@contextmanager
+def pagedmoe_mtp_kt_context():
+    """
+    Context manager for MTP draft model init when kt_mtp_weight_path is configured.
+    Instead of disabling KT EP wrapper entirely, routes it to the MTP pagedmoe storage.
+    """
+    global DISABLE_KT_EP_WRAPPER, KT_EP_WRAPPER_USE_MTP_PATH
+    orig_disable = DISABLE_KT_EP_WRAPPER
+    orig_mtp = KT_EP_WRAPPER_USE_MTP_PATH
+    try:
+        DISABLE_KT_EP_WRAPPER = False
+        KT_EP_WRAPPER_USE_MTP_PATH = True
+        yield
+    finally:
+        DISABLE_KT_EP_WRAPPER = orig_disable
+        KT_EP_WRAPPER_USE_MTP_PATH = orig_mtp
 
 
 # The type of method in top-K routing, for use in torch custom op

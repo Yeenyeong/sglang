@@ -713,8 +713,15 @@ def np_cache_weights_iterator(
 def safetensors_weights_iterator(
     hf_weights_files: List[str],
     disable_mmap: bool = False,
+    name_filter=None,
 ) -> Generator[Tuple[str, torch.Tensor], None, None]:
-    """Iterate over the weights in the model safetensor files."""
+    """Iterate over the weights in the model safetensor files.
+
+    Args:
+        name_filter: optional callable(name: str) -> bool.  When provided,
+            names for which it returns False are skipped *before*
+            ``f.get_tensor()`` is called, avoiding unnecessary disk I/O.
+    """
     enable_tqdm = (
         not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
     )
@@ -729,10 +736,14 @@ def safetensors_weights_iterator(
             with open(st_file, "rb") as f:
                 result = safetensors.torch.load(f.read())
                 for name in sorted(result.keys()):
+                    if name_filter is not None and not name_filter(name):
+                        continue
                     yield name, result[name]
         else:
             with safetensors.safe_open(st_file, framework="pt", device="cpu") as f:
                 for name in f.keys():
+                    if name_filter is not None and not name_filter(name):
+                        continue
                     yield name, f.get_tensor(name)
 
 

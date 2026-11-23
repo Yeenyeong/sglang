@@ -472,9 +472,15 @@ class DefaultModelLoader(BaseModelLoader):
         return hf_folder, hf_weights_files, use_safetensors
 
     def _get_weights_iterator(
-        self, source: "Source"
+        self, source: "Source", name_filter=None
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
-        """Get an iterator for the model weights based on the load format."""
+        """Get an iterator for the model weights based on the load format.
+
+        Args:
+            name_filter: optional callable(name: str) -> bool passed through to
+                ``safetensors_weights_iterator``.  Names for which it returns
+                False are skipped before ``get_tensor()`` is called.
+        """
         extra_config = self.load_config.model_loader_extra_config
         use_multithread = extra_config.get("enable_multithread_load", False)
         hf_folder, hf_weights_files, use_safetensors = self._prepare_weights(
@@ -517,7 +523,9 @@ class DefaultModelLoader(BaseModelLoader):
                 )
             else:
                 weights_iterator = safetensors_weights_iterator(
-                    hf_weights_files, disable_mmap=weight_loader_disable_mmap
+                    hf_weights_files,
+                    disable_mmap=weight_loader_disable_mmap,
+                    name_filter=name_filter,
                 )
 
         else:
@@ -566,14 +574,28 @@ class DefaultModelLoader(BaseModelLoader):
         model: nn.Module,
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
 
+        # When PagedMoE is active with 0 GPU experts, all routed expert weights
+        # are served from ktensor SSD storage.  Skipping f.get_tensor() for
+        # expert tensors avoids reading ~720 GB of BF16 data that would be
+        # discarded immediately, cutting model startup time significantly.
+        name_filter = None
+        server_args = get_global_server_args()
+        if (
+            server_args is not None
+            and getattr(server_args, "kt_method", None) == "PAGEDMOE"
+            and getattr(server_args, "kt_num_gpu_experts", None) == 0
+        ):
+            _EXPERT_RE = re.compile(r"\.mlp\.experts\.(gate_up_proj|down_proj)$")
+            name_filter = lambda name: not _EXPERT_RE.search(name)
+
         primary_weights = DefaultModelLoader.Source.init_new(model_config, model)
-        yield from self._get_weights_iterator(primary_weights)
+        yield from self._get_weights_iterator(primary_weights, name_filter=name_filter)
 
         secondary_weights = cast(
             Iterable[DefaultModelLoader.Source], getattr(model, "secondary_weights", ())
         )
         for source in secondary_weights:
-            yield from self._get_weights_iterator(source)
+            yield from self._get_weights_iterator(source, name_filter=name_filter)
 
     def download_model(self, model_config: ModelConfig) -> None:
         self._prepare_weights(
